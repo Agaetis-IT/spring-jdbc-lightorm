@@ -9,10 +9,11 @@ import java.util.List;
  */
 public abstract class LightOrmPagedRepository<T> extends LightOrmCrudRepository<T>{
 
-    public List<T> findAll(Pageable pageable) {
-        return getJdbcTemplate().query("select * from "
+    public List<T> findAll(Pageable pageable, String orderColumnName) {
+    	String sql = "select * from "
                 + getBeanMappingDescriptor().getEscapedTableName()
-                + " offset " + pageable.getPageNumber() + " limit " + pageable.getPageSize(),
+                + " order by " + orderColumnName + " offset " + pageable.getPageNumber() + " rows fetch next " + pageable.getPageSize() + " rows only";
+    	return getJdbcTemplate().query(sql,
                 getRowMapper());
     }
 }
