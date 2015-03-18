@@ -4,7 +4,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Created by <a href="https://github.com/rnicob">Nicolas Roux</a> - <a href="http://www.agaetis.fr">Agaetis</a>  on 12/03/2015.
+ * Created by <a href="https://github.com/rnicob">Nicolas Roux</a> - <a
+ * href="http://www.agaetis.fr">Agaetis</a> on 12/03/2015.
  */
 public class RegisteredDao {
 

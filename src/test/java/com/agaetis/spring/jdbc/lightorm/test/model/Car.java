@@ -10,54 +10,57 @@ import com.agaetis.spring.jdbc.lightorm.annotation.Table;
 @Table("tblcar")
 public class Car {
 
-    @Id(autoIncrement = true)
-    @Column("carid")
-    private Long id;
+	@Id(autoIncrement = true)
+	@Column("carid")
+	private Long id;
 
-    @Column("brandref")
-    private Integer bandId;
+	@Column("brandref")
+	private Integer bandId;
 
-    @Column
-    private String name;
+	@Column
+	private String name;
 
-    public Long getId() {
-        return id;
-    }
+	public Long getId() {
+		return id;
+	}
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+	public void setId(Long id) {
+		this.id = id;
+	}
 
-    public Integer getBandId() {
-        return bandId;
-    }
+	public Integer getBandId() {
+		return bandId;
+	}
 
-    public void setBandId(Integer bandId) {
-        this.bandId = bandId;
-    }
+	public void setBandId(Integer bandId) {
+		this.bandId = bandId;
+	}
 
-    public String getName() {
-        return name;
-    }
+	public String getName() {
+		return name;
+	}
 
-    public void setName(String name) {
-        this.name = name;
-    }
+	public void setName(String name) {
+		this.name = name;
+	}
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+	@Override
+	public boolean equals(Object o) {
+		if (this == o)
+			return true;
+		if (o == null || getClass() != o.getClass())
+			return false;
 
-        Car car = (Car) o;
+		Car car = (Car) o;
 
-        if (id != null ? !id.equals(car.id) : car.id != null) return false;
+		if (id != null ? !id.equals(car.id) : car.id != null)
+			return false;
 
-        return true;
-    }
+		return true;
+	}
 
-    @Override
-    public int hashCode() {
-        return id != null ? id.hashCode() : 0;
-    }
+	@Override
+	public int hashCode() {
+		return id != null ? id.hashCode() : 0;
+	}
 }

@@ -6,15 +6,17 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Created by <a href="https://github.com/rnicob">Nicolas Roux</a> - <a href="http://www.agaetis.fr">Agaetis</a>  on 12/03/2015.
+ * Created by <a href="https://github.com/rnicob">Nicolas Roux</a> - <a
+ * href="http://www.agaetis.fr">Agaetis</a> on 12/03/2015.
  */
-@Target({ElementType.FIELD})
+@Target({ ElementType.FIELD })
 @Retention(RetentionPolicy.RUNTIME)
 public @interface LazyLoading {
 
-    /**
-     * le nom du champ qui a l'id � mapper
-     * @return
-     */
-    String value() default "";
+	/**
+	 * le nom du champ qui a l'id à mapper
+	 *
+	 * @return
+	 */
+	String value() default "";
 }

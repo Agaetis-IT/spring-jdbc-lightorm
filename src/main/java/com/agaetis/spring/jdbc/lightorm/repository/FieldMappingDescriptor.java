@@ -7,13 +7,14 @@ import java.lang.reflect.Method;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
+import org.springframework.dao.InvalidDataAccessResourceUsageException;
 
 import com.agaetis.spring.jdbc.lightorm.annotation.Column;
 import com.agaetis.spring.jdbc.lightorm.annotation.Id;
-import org.springframework.dao.InvalidDataAccessResourceUsageException;
 
 /**
- * Created by <a href="https://github.com/rnicob">Nicolas Roux</a> - <a href="http://www.agaetis.fr">Agaetis</a>  on 12/03/2015.
+ * Created by <a href="https://github.com/rnicob">Nicolas Roux</a> - <a
+ * href="http://www.agaetis.fr">Agaetis</a> on 12/03/2015.
  */
 public class FieldMappingDescriptor {
 	private Field field;
