@@ -36,7 +36,7 @@ public abstract class AbstractTest {
 
 		@Bean
 		public DataSource dataSource() {
-			return new EmbeddedDatabaseBuilder().setType(EmbeddedDatabaseType.H2).addScript("classpath:schema.sql").addScript("classpath:test-data.sql").build();
+			return new EmbeddedDatabaseBuilder().setType(EmbeddedDatabaseType.H2).addScripts("classpath:schema.sql", "classpath:test-data.sql").build();
 		}
 	}
 
