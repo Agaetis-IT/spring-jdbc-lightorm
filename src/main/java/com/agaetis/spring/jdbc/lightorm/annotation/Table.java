@@ -15,8 +15,10 @@ public @interface Table {
 	/**
 	 * le nom de la table. Si rien n'est déclaré, c'est le nom de la classe en
 	 * minuscule
-	 * 
+	 *
 	 * @return
 	 */
 	String value() default "";
+
+	String schema() default "";
 }
