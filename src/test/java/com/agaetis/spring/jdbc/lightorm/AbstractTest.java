@@ -1,4 +1,4 @@
-package com.agaetis.spring.jdbc.lightorm.test;
+package com.agaetis.spring.jdbc.lightorm;
 
 import javax.sql.DataSource;
 
@@ -8,6 +8,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
 import org.springframework.test.context.ContextConfiguration;
@@ -37,6 +38,11 @@ public abstract class AbstractTest {
 		@Bean
 		public DataSource dataSource() {
 			return new EmbeddedDatabaseBuilder().setType(EmbeddedDatabaseType.H2).addScripts("classpath:schema.sql", "classpath:test-data.sql").build();
+		}
+
+		@Bean
+		public JdbcTemplate jdbcTamplate() {
+			return new JdbcTemplate(dataSource());
 		}
 	}
 

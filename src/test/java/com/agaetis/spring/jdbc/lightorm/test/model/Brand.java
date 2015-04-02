@@ -7,30 +7,26 @@ import com.agaetis.spring.jdbc.lightorm.annotation.Table;
 /**
  * Created by User on 11/03/2015.
  */
-@Table("car")
-public class Car {
+@Table
+public class Brand {
 
-	@Id(autoIncrement = true)
+	@Id(autoIncrement = false)
 	@Column("id")
 	private Long id;
-
-	@Column("brand")
-	private int brand;
 
 	@Column
 	private String name;
 
-	public Car() {
-		this(0, null);
+	public Brand() {
+		this(null);
 	}
 
-	public Car(int brand, String name) {
-		this(null, brand, name);
+	public Brand(String name) {
+		this(null, name);
 	}
 
-	public Car(Long id, int brand, String name) {
+	public Brand(Long id, String name) {
 		this.id = id;
-		this.brand = brand;
 		this.name = name;
 	}
 
@@ -42,14 +38,6 @@ public class Car {
 		this.id = id;
 	}
 
-	public int getBrand() {
-		return brand;
-	}
-
-	public void setBrand(int brand) {
-		this.brand = brand;
-	}
-
 	public String getName() {
 		return name;
 	}
@@ -59,25 +47,33 @@ public class Car {
 	}
 
 	@Override
-	public boolean equals(Object o) {
-		if (this == o) {
-			return true;
-		}
-		if ((o == null) || (getClass() != o.getClass())) {
-			return false;
-		}
-
-		Car car = (Car) o;
-
-		if (id != null ? !id.equals(car.id) : car.id != null) {
-			return false;
-		}
-
-		return true;
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = (prime * result) + ((name == null) ? 0 : name.hashCode());
+		return result;
 	}
 
 	@Override
-	public int hashCode() {
-		return id != null ? id.hashCode() : 0;
+	public boolean equals(Object obj) {
+		if (this == obj) {
+			return true;
+		}
+		if (obj == null) {
+			return false;
+		}
+		if (getClass() != obj.getClass()) {
+			return false;
+		}
+		Brand other = (Brand) obj;
+		if (name == null) {
+			if (other.name != null) {
+				return false;
+			}
+		} else if (!name.equals(other.name)) {
+			return false;
+		}
+		return true;
 	}
+
 }
