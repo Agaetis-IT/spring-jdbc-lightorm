@@ -1,8 +1,8 @@
 package com.agaetis.spring.jdbc.lightorm.repository;
 
 import java.beans.PropertyDescriptor;
+import java.io.Serializable;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -14,28 +14,38 @@ import java.util.Map.Entry;
 import javax.annotation.PostConstruct;
 import javax.sql.DataSource;
 
-import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.GenericTypeResolver;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.repository.CrudRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.util.Assert;
 
 import com.agaetis.spring.jdbc.lightorm.annotation.LazyLoading;
+import com.agaetis.spring.jdbc.lightorm.mapping.BeanMappingDescriptor;
+import com.agaetis.spring.jdbc.lightorm.mapping.ColumnMappingDescriptor;
+import com.agaetis.spring.jdbc.lightorm.mapping.IdMappingDescriptor;
 import com.agaetis.spring.jdbc.lightorm.rowmapper.AnnotatedBeanPropertyRowMapper;
+import com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator;
 
 /**
  * @author <a href="https://github.com/rnicob">Nicolas Roux</a> - <a
  *         href="http://www.agaetis.fr">Agaetis</a> Created on 12/03/2015.
  */
-public abstract class LightOrmCrudRepository<T> {
+public abstract class LightOrmCrudRepository<T, ID extends Serializable> implements CrudRepository<T, ID> {
+
+	protected final Logger logger = LoggerFactory.getLogger(getClass());
+
 	@Autowired
 	private DataSource dataSource;
 
@@ -43,25 +53,30 @@ public abstract class LightOrmCrudRepository<T> {
 
 	private NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 
-	private BeanMappingDescriptor<T> beanMappingDescriptor;
+	private BeanMappingDescriptor<T, ID> beanMappingDescriptor;
 
-	@Value("${datasource.escapedcharacter}")
+	@Value("${lightorm.datasource.escapedcharacter}")
 	private String escapedCharacter;
 
 	private RowMapper<T> defaultRowMapper;
 
-	public abstract Class<T> getTableClass();
+	private Class<T> domainClass;
 
+	@Autowired
+	protected SqlGenerator generator;
+
+	public Class<T> getDomainClass() {
+		return domainClass;
+	}
+
+	@SuppressWarnings("unchecked")
 	public LightOrmCrudRepository() {
+		domainClass = (Class<T>) GenericTypeResolver.resolveTypeArguments(getClass(), LightOrmCrudRepository.class)[0];
 		RegisteredDao.registerDao(this);
 	}
 
-	protected BeanMappingDescriptor<T> getBeanMappingDescriptor() {
+	protected BeanMappingDescriptor<T, ID> getBeanMappingDescriptor() {
 		return beanMappingDescriptor;
-	}
-
-	protected String getEscapedTableName() {
-		return beanMappingDescriptor.getEscapedTableName();
 	}
 
 	protected JdbcTemplate getJdbcTemplate() {
@@ -77,108 +92,116 @@ public abstract class LightOrmCrudRepository<T> {
 		jdbcTemplate = new JdbcTemplate(dataSource);
 		namedParameterJdbcTemplate = new NamedParameterJdbcTemplate(dataSource);
 
-		defaultRowMapper = AnnotatedBeanPropertyRowMapper.newInstance(getTableClass());
+		defaultRowMapper = AnnotatedBeanPropertyRowMapper.newInstance(getDomainClass());
 
-		beanMappingDescriptor = new BeanMappingDescriptor<T>(getTableClass(), escapedCharacter);
+		beanMappingDescriptor = new BeanMappingDescriptor<T, ID>(getDomainClass(), escapedCharacter);
 	}
 
 	protected RowMapper<T> getRowMapper() {
 		return defaultRowMapper;
 	}
 
-	public T createOrUpdate(T obj) {
-		List<FieldMappingDescriptor> fieldIdDescriptors = beanMappingDescriptor.getFieldIdMappingDescriptors();
+	@Override
+	public <S extends T> S save(S entity) {
 
-		for (FieldMappingDescriptor fieldIdDescriptor : fieldIdDescriptors) {
-			Object value = fieldIdDescriptor.readFieldValue(obj);
-
-			if (value == null) {
-				return create(obj);
-			}
-			if (Number.class.isAssignableFrom(value.getClass()) && value.equals(0)) {
-				return create(obj);
-			}
+		if (isNew(entity)) {
+			return create(entity);
 		}
 
-		try {
-			findById(extractIdParams(obj));
-		} catch (EmptyResultDataAccessException e) {
-			return create(obj);
+		if (findOne(getId(entity)) == null) {
+			return create(entity);
 		}
 
-		update(obj);
-		return obj;
+		update(entity);
+
+		return entity;
 	}
 
-	public T create(T obj) {
-		Map<String, Object> fieldIdParams = extractIdParams(obj);
-		Map<String, Object> fieldParams = extractNonIdParams(obj);
+	@SuppressWarnings("unchecked")
+	private <S extends T> ID getId(S entity) {
+		IdMappingDescriptor<ID> idDescriptor = beanMappingDescriptor.getIdMappingDescriptor();
 
-		// On vérifie que les clés primaires soient saisies si on est pas sur
-		// une clé auto incrémentée
-		if (!beanMappingDescriptor.isIdAutoIncremented()) {
-			for (Object value : fieldIdParams.values()) {
-				if (value == null) {
-					throw new InvalidDataAccessApiUsageException("Impossible de créer un objet sans clé primaire renseignée");
-				}
+		return (ID) idDescriptor.readFieldValue(entity);
+	}
+
+	private <S extends T> boolean isNew(S entity) {
+		IdMappingDescriptor<ID> idDescriptor = beanMappingDescriptor.getIdMappingDescriptor();
+		Object id = idDescriptor.readFieldValue(entity);
+
+		if (id == null) {
+			return true;
+		}
+
+		if (!idDescriptor.isComposite()) {
+			if (Number.class.isAssignableFrom(id.getClass()) && id.equals(0)) {
+				return true;
 			}
 		}
+		return false;
+	}
 
-		Map<String, Object> allParams = new HashMap<String, Object>(fieldIdParams.size() + fieldParams.size());
-		allParams.putAll(fieldIdParams);
-		allParams.putAll(fieldParams);
+	@Override
+	public boolean exists(ID id) {
+		Assert.notNull(id, "The given id must not be null!");
 
-		// Création de la liste des champs à mettre à jour
-		List<String> updatedValueFields = new ArrayList<String>(allParams.size());
-		List<String> updatedFields = new ArrayList<String>(allParams.size());
-		for (FieldMappingDescriptor field : beanMappingDescriptor.getFieldMappingDescriptors()) {
-			// création des conditions
-			updatedFields.add(field.getEscapedColumnName());
-			updatedValueFields.add(":" + field.getColumnName());
+		return findOne(id) != null;
+	}
+
+	@Override
+	public long count() {
+		String sql = generator.count(beanMappingDescriptor.getEscapedTableName());
+		return jdbcTemplate.queryForObject(sql, Long.class);
+	}
+
+	@Override
+	public <S extends T> Iterable<S> save(Iterable<S> entities) {
+		List<S> result = new ArrayList<S>();
+
+		if (entities == null) {
+			return result;
 		}
 
-		// La cl� n'est pas g�n�r�e automatiquement
-		if (!beanMappingDescriptor.isIdAutoIncremented()) {
-			for (FieldMappingDescriptor field : beanMappingDescriptor.getFieldIdMappingDescriptors()) {
-				// création des conditions
-				updatedFields.add(field.getEscapedColumnName());
-				updatedValueFields.add(":" + field.getColumnName());
-			}
+		for (S entity : entities) {
+			result.add(save(entity));
 		}
 
-		StringBuilder sb = new StringBuilder();
-		sb.append("insert into ").append(beanMappingDescriptor.getEscapedTableName()).append(" ( ").append(StringUtils.join(updatedFields, ",")).append(") values (")
-				.append(StringUtils.join(updatedValueFields, " , ")).append(")");
-
-		if (beanMappingDescriptor.isIdAutoIncremented()) {
-			createWithKeyHolder(obj, sb.toString(), allParams);
-		} else {
-			namedParameterJdbcTemplate.update(sb.toString(), allParams);
-		}
-		return obj;
+		return result;
 	}
 
 	private void createWithKeyHolder(T obj, String sql, Map<String, Object> allParams) {
-		FieldMappingDescriptor fieldIdDescriptor = beanMappingDescriptor.getFieldIdMappingDescriptors().get(0);
+		IdMappingDescriptor<ID> idDescriptor = beanMappingDescriptor.getIdMappingDescriptor();
+
+		ColumnMappingDescriptor columnDescriptor = idDescriptor.getColumns().get(0);
+
 		KeyHolder keyHolder = new GeneratedKeyHolder();
 
 		MapSqlParameterSource parameterSource = buildParameterSource(allParams);
 
-		namedParameterJdbcTemplate.update(sql, parameterSource, keyHolder, new String[] { fieldIdDescriptor.getColumnName() });
+		namedParameterJdbcTemplate.update(sql, parameterSource, keyHolder, new String[] { columnDescriptor.getColumnName() });
 
-		if (fieldIdDescriptor.getField().getType().equals(Integer.class)) {
-			fieldIdDescriptor.writeFieldValue(obj, keyHolder.getKey().intValue());
-		} else if (fieldIdDescriptor.getField().getType().equals(Long.class)) {
-			fieldIdDescriptor.writeFieldValue(obj, keyHolder.getKey().longValue());
+		Field field = columnDescriptor.getField();
+
+		if (field.getType().equals(Integer.class)) {
+			columnDescriptor.writeFieldValue(obj, keyHolder.getKey().intValue());
+		} else if (field.getType().equals(Long.class)) {
+			columnDescriptor.writeFieldValue(obj, keyHolder.getKey().longValue());
+		} else if (field.getType().equals(Byte.class)) {
+			columnDescriptor.writeFieldValue(obj, keyHolder.getKey().byteValue());
+		} else if (field.getType().equals(Double.class)) {
+			columnDescriptor.writeFieldValue(obj, keyHolder.getKey().doubleValue());
+		} else if (field.getType().equals(Float.class)) {
+			columnDescriptor.writeFieldValue(obj, keyHolder.getKey().floatValue());
+		} else if (field.getType().equals(Short.class)) {
+			columnDescriptor.writeFieldValue(obj, keyHolder.getKey().shortValue());
 		} else {
-			throw new InvalidDataAccessApiUsageException("Auto-incremented field [" + fieldIdDescriptor.getField().getName() + "] of type ["
-					+ fieldIdDescriptor.getField().getType().getCanonicalName() + "]not managed ");
+			throw new InvalidDataAccessApiUsageException("Auto-incremented field [" + field.getName() + "] of type [" + field.getType().getCanonicalName() + "] not managed.");
 		}
 	}
 
 	private MapSqlParameterSource buildParameterSource(Map<String, Object> parameters) {
 
 		MapSqlParameterSource parameterSource = new MapSqlParameterSource();
+
 		for (Entry<String, Object> parameter : parameters.entrySet()) {
 			String key = parameter.getKey();
 			Object value = parameter.getValue();
@@ -194,9 +217,58 @@ public abstract class LightOrmCrudRepository<T> {
 		return parameterSource;
 	}
 
-	public void update(T obj) {
+	protected <S extends T> S create(S obj) {
 		Map<String, Object> fieldIdParams = extractIdParams(obj);
-		Map<String, Object> fieldParams = extractNonIdParams(obj);
+		Map<String, Object> fieldParams = extractColmunParams(obj);
+
+		// On vérifie que les clés primaires soient saisies si on est pas sur
+		// une clé auto incrémentée
+		boolean autoIncremented = beanMappingDescriptor.getIdMappingDescriptor().isAutoIncremented();
+
+		if (!autoIncremented) {
+			for (Object value : fieldIdParams.values()) {
+				if (value == null) {
+					throw new InvalidDataAccessApiUsageException("Unable to create entity with not auto incremented id and null value");
+				}
+			}
+		}
+
+		Map<String, Object> allParams = new HashMap<String, Object>(fieldIdParams.size() + fieldParams.size());
+		allParams.putAll(fieldIdParams);
+		allParams.putAll(fieldParams);
+
+		// Création de la liste des champs à mettre à jour
+		List<String> updatedValueFields = new ArrayList<String>(allParams.size());
+		List<String> updatedFields = new ArrayList<String>(allParams.size());
+
+		for (ColumnMappingDescriptor field : beanMappingDescriptor.getColumnsMappingDescriptors()) {
+			// création des conditions
+			updatedFields.add(field.getEscapedColumnName());
+			updatedValueFields.add(":" + field.getColumnName());
+		}
+
+		// La clé n'est pas generee automatiquement
+		if (!autoIncremented) {
+			for (ColumnMappingDescriptor field : beanMappingDescriptor.getIdMappingDescriptor()) {
+				// création des conditions
+				updatedFields.add(field.getEscapedColumnName());
+				updatedValueFields.add(":" + field.getColumnName());
+			}
+		}
+
+		String sql = generator.insert(beanMappingDescriptor.getEscapedTableName(), updatedFields, updatedValueFields);
+
+		if (autoIncremented) {
+			createWithKeyHolder(obj, sql, allParams);
+		} else {
+			namedParameterJdbcTemplate.update(sql, allParams);
+		}
+		return obj;
+	}
+
+	protected void update(T obj) {
+		Map<String, Object> fieldIdParams = extractIdParams(obj);
+		Map<String, Object> fieldParams = extractColmunParams(obj);
 
 		// On vérifie que les clés primaires soient saisies
 		for (Object value : fieldIdParams.values()) {
@@ -212,96 +284,105 @@ public abstract class LightOrmCrudRepository<T> {
 		// Création des conditions sur la clé primaire
 		List<String> sqlConditions = new ArrayList<String>(fieldIdParams.size());
 
-		for (FieldMappingDescriptor fieldId : beanMappingDescriptor.getFieldIdMappingDescriptors()) {
+		for (ColumnMappingDescriptor fieldId : beanMappingDescriptor.getIdMappingDescriptor()) {
 			// création des conditions
 			sqlConditions.add(fieldId.getEscapedColumnName() + "=:" + fieldId.getColumnName());
 		}
 
 		// Création de la liste des champs à mettre à jour
 		List<String> updatedFields = new ArrayList<String>(fieldParams.size());
-		for (FieldMappingDescriptor field : beanMappingDescriptor.getFieldMappingDescriptors()) {
+		for (ColumnMappingDescriptor field : beanMappingDescriptor.getColumnsMappingDescriptors()) {
 			// création des conditions
 			updatedFields.add(field.getEscapedColumnName() + "=:" + field.getColumnName());
 		}
 
-		StringBuilder sb = new StringBuilder();
-		sb.append("update ").append(beanMappingDescriptor.getEscapedTableName()).append(" set ").append(StringUtils.join(updatedFields, ",")).append(" where ")
-				.append(StringUtils.join(sqlConditions, " and "));
+		String sql = generator.update(beanMappingDescriptor.getEscapedTableName(), updatedFields, sqlConditions);
 
 		MapSqlParameterSource parameterSource = buildParameterSource(allParams);
 
-		namedParameterJdbcTemplate.update(sb.toString(), parameterSource);
+		namedParameterJdbcTemplate.update(sql, parameterSource);
 	}
 
-	public List<T> create(List<T> objList) {
-		for (T obj : objList) {
-			create(obj);
-		}
-		return objList;
-	}
-
-	public List<T> update(List<T> objList) {
-		for (T obj : objList) {
-			update(obj);
-		}
-		return objList;
-	}
-
-	public List<T> createOrUpdate(List<T> objList) {
-		for (T obj : objList) {
-			createOrUpdate(obj);
-		}
-		return objList;
-	}
-
+	@Override
 	public List<T> findAll() {
-		return jdbcTemplate.query("select * from " + beanMappingDescriptor.getEscapedTableName(), getRowMapper());
+		String sql = generator.select(beanMappingDescriptor.getEscapedTableName());
+		return jdbcTemplate.query(sql, getRowMapper());
 	}
 
-	public T findById(Object id) {
-		if (beanMappingDescriptor.getFieldIdMappingDescriptors().size() != 1) {
-			throw new InvalidDataAccessApiUsageException("Le nombre de champs ID ne correspondent pas [" + this.getTableClass().getCanonicalName() + "]");
+	@Override
+	public Iterable<T> findAll(Iterable<ID> ids) {
+		if ((ids == null) || !ids.iterator().hasNext()) {
+			return Collections.emptyList();
 		}
 
-		FieldMappingDescriptor fieldMappingDescriptor = beanMappingDescriptor.getFieldIdMappingDescriptors().get(0);
-		StringBuilder sb = new StringBuilder();
-		sb.append("select * from ").append(beanMappingDescriptor.getEscapedTableName()).append(" where ").append(fieldMappingDescriptor.getEscapedColumnName()).append("=:")
-				.append(fieldMappingDescriptor.getColumnName());
+		List<T> results = new ArrayList<T>();
 
-		Map<String, Object> params = Collections.singletonMap(fieldMappingDescriptor.getColumnName(), id);
+		for (ID id : ids) {
+			results.add(findOne(id));
+		}
 
-		return namedParameterJdbcTemplate.queryForObject(sb.toString(), params, getRowMapper());
-
+		return results;
 	}
 
-	/**
-	 * @param ids
-	 *            clé : nom de colonne non echappé, valeur : objet
-	 * @return
-	 */
-	public T findById(Map<String, Object> ids) {
-		if (beanMappingDescriptor.getFieldIdMappingDescriptors().size() != ids.size()) {
-			throw new InvalidDataAccessApiUsageException("Le nombre de champs ID ne correspondent pas [" + this.getTableClass().getCanonicalName() + "]");
-		}
+	@Override
+	public T findOne(ID id) {
+		List<String> sqlConditions = new ArrayList<String>(beanMappingDescriptor.getIdMappingDescriptor().size());
 
-		List<String> sqlConditions = new ArrayList<String>(ids.size());
-
-		for (FieldMappingDescriptor fieldId : beanMappingDescriptor.getFieldIdMappingDescriptors()) {
-			// Si on ne trouve pas la correspondance
-			if (!ids.keySet().contains(fieldId.getColumnName())) {
-				throw new InvalidDataAccessApiUsageException("Le champs ID [" + fieldId.getColumnName() + "] recherché ne correspondent pas [" + this.getTableClass().getCanonicalName() + "]");
-			}
-
+		for (ColumnMappingDescriptor fieldId : beanMappingDescriptor.getIdMappingDescriptor()) {
 			// création des conditions
 			sqlConditions.add(fieldId.getEscapedColumnName() + "=:" + fieldId.getColumnName());
 		}
 
-		StringBuilder sb = new StringBuilder();
-		sb.append("select * from ").append(beanMappingDescriptor.getEscapedTableName()).append(" where ").append(StringUtils.join(sqlConditions, " and "));
+		String sql = generator.select(beanMappingDescriptor.getEscapedTableName(), sqlConditions);
 
-		return namedParameterJdbcTemplate.queryForObject(sb.toString(), ids, getRowMapper());
+		Map<String, Object> params = extractIdParams(id);
+
+		try {
+			return namedParameterJdbcTemplate.queryForObject(sql, params, getRowMapper());
+		} catch (EmptyResultDataAccessException ex) {
+			return null;
+		}
 	}
 
+	public T findOne(ID id, String... properties) {
+
+		T result = findOne(id);
+		if (result == null) {
+			return null;
+		}
+
+		try {
+			loadLazyProperties(result, properties);
+		} catch (EmptyResultDataAccessException e) {
+			logger.warn("Unable to load properties [" + properties.toString() + "] for [" + domainClass.getCanonicalName() + " - " + id + "]");
+		}
+
+		return result;
+	}
+
+	@Override
+	public void delete(ID id) {
+		Map<String, Object> params = extractIdParams(id);
+
+		// On vérifie que les clés primaires soient saisies
+		for (Object value : params.values()) {
+			if (value == null) {
+				throw new InvalidDataAccessApiUsageException("Impossible de supprimer un objet sans clé primaire renseignée");
+			}
+		}
+
+		List<String> sqlConditions = new ArrayList<String>(beanMappingDescriptor.getIdMappingDescriptor().size());
+
+		for (ColumnMappingDescriptor fieldId : beanMappingDescriptor.getIdMappingDescriptor()) {
+			// création des conditions
+			sqlConditions.add(fieldId.getEscapedColumnName() + "=:" + fieldId.getColumnName());
+		}
+		String sql = generator.delete(beanMappingDescriptor.getEscapedTableName(), sqlConditions);
+
+		namedParameterJdbcTemplate.update(sql, params);
+	}
+
+	@Override
 	public void delete(T obj) {
 		Map<String, Object> params = extractIdParams(obj);
 
@@ -312,44 +393,72 @@ public abstract class LightOrmCrudRepository<T> {
 			}
 		}
 
-		List<String> sqlConditions = new ArrayList<String>(params.size());
+		List<String> sqlConditions = new ArrayList<String>(beanMappingDescriptor.getIdMappingDescriptor().size());
 
-		for (FieldMappingDescriptor fieldId : beanMappingDescriptor.getFieldIdMappingDescriptors()) {
+		for (ColumnMappingDescriptor fieldId : beanMappingDescriptor.getIdMappingDescriptor()) {
 			// création des conditions
 			sqlConditions.add(fieldId.getEscapedColumnName() + "=:" + fieldId.getColumnName());
 		}
 
-		StringBuilder sb = new StringBuilder();
-		sb.append("delete from ").append(beanMappingDescriptor.getEscapedTableName()).append(" where ").append(StringUtils.join(sqlConditions, " and "));
+		String sql = generator.delete(beanMappingDescriptor.getEscapedTableName(), sqlConditions);
 
-		namedParameterJdbcTemplate.update(sb.toString(), params);
+		namedParameterJdbcTemplate.update(sql, params);
 	}
 
+	@Override
+	public void delete(Iterable<? extends T> entities) {
+		Assert.notNull(entities, "The given Iterable of entities not be null!");
+
+		for (T entity : entities) {
+			delete(entity);
+		}
+	}
+
+	@Override
 	public void deleteAll() {
-		String sql = "delete from " + beanMappingDescriptor.getEscapedTableName();
+		String sql = generator.delete(beanMappingDescriptor.getEscapedTableName());
 		jdbcTemplate.update(sql);
 	}
 
 	protected Map<String, Object> extractIdParams(T obj) {
-		return extractParams(obj, beanMappingDescriptor.getFieldIdMappingDescriptors());
+		IdMappingDescriptor<ID> descriptor = beanMappingDescriptor.getIdMappingDescriptor();
+
+		Map<String, Object> params = new HashMap<String, Object>(descriptor.getColumns().size());
+
+		if (!descriptor.isComposite()) {
+			for (ColumnMappingDescriptor column : descriptor) {
+				Object value = column.readFieldValue(obj);
+				params.put(column.getColumnName(), value);
+			}
+		} else {
+			ID id = descriptor.getIdClass().cast(descriptor.readFieldValue(obj));
+			return extractIdParams(id);
+		}
+		return params;
 	}
 
-	protected Map<String, Object> extractNonIdParams(T obj) {
-		return extractParams(obj, beanMappingDescriptor.getFieldMappingDescriptors());
+	protected Map<String, Object> extractIdParams(ID id) {
+		IdMappingDescriptor<ID> descriptor = beanMappingDescriptor.getIdMappingDescriptor();
+
+		Map<String, Object> params = new HashMap<String, Object>(descriptor.getColumns().size());
+
+		if (descriptor.isComposite()) {
+			for (ColumnMappingDescriptor column : descriptor) {
+				Object value = column.readFieldValue(id);
+				params.put(column.getColumnName(), value);
+			}
+		} else {
+			params.put(descriptor.getColumns().get(0).getColumnName(), id);
+		}
+		return params;
 	}
 
-	/**
-	 * @param obj
-	 * @param fieldMappingDescriptors
-	 * @return renvoie une map avec en clé le nom de la colonne (non échapé) et
-	 *         en valeur la valeur pour ce champ
-	 */
-	private Map<String, Object> extractParams(T obj, List<FieldMappingDescriptor> fieldMappingDescriptors) {
-		HashMap<String, Object> params = new HashMap<String, Object>();
+	protected Map<String, Object> extractColmunParams(T obj) {
+		Map<String, Object> params = new HashMap<String, Object>(beanMappingDescriptor.getColumnsMappingDescriptors().size());
 
-		for (FieldMappingDescriptor fieldMappingDescriptor : fieldMappingDescriptors) {
-			Object value = fieldMappingDescriptor.readFieldValue(obj);
-			params.put(fieldMappingDescriptor.getColumnName(), value);
+		for (ColumnMappingDescriptor column : beanMappingDescriptor.getColumnsMappingDescriptors()) {
+			Object value = column.readFieldValue(obj);
+			params.put(column.getColumnName(), value);
 		}
 
 		return params;
@@ -361,40 +470,38 @@ public abstract class LightOrmCrudRepository<T> {
 		}
 
 		for (String property : properties) {
-			Class<T> tableClass = getTableClass();
+			Class<T> tableClass = getDomainClass();
 			try {
 				Field fieldToLoad = tableClass.getDeclaredField(property);
 				LazyLoading lazyLoading = fieldToLoad.getAnnotation(LazyLoading.class);
 				if (lazyLoading == null) {
-					throw new InvalidDataAccessApiUsageException("LazyLoading annotation not found on field [" + property + "], Table Class [" + getTableClass().getName() + "]");
+					throw new InvalidDataAccessApiUsageException("LazyLoading annotation not found on field [" + property + "], Table Class [" + getDomainClass().getName() + "]");
 				}
 
-				PropertyDescriptor pdWithKey = BeanUtils.getPropertyDescriptor(tableClass, lazyLoading.value());
+				PropertyDescriptor pd = BeanUtils.getPropertyDescriptor(tableClass, lazyLoading.value());
 
-				LightOrmCrudRepository<?> dao = RegisteredDao.getDao(fieldToLoad.getType());
+				@SuppressWarnings("unchecked")
+				LightOrmCrudRepository<Object, Serializable> dao = (LightOrmCrudRepository<Object, Serializable>) RegisteredDao.getDao(fieldToLoad.getType());
 				if (dao == null) {
-					throw new InvalidDataAccessApiUsageException("Dao not found for Table Class [" + getTableClass().getName() + "]");
+					throw new InvalidDataAccessApiUsageException("Dao not found for Table Class [" + getDomainClass().getName() + "]");
 				}
 
-				Object id = pdWithKey.getReadMethod().invoke(obj);
+				Serializable id = (Serializable) pd.getReadMethod().invoke(obj);
 				if (id == null) {
 					return;
 				}
 
-				Object objectLoaded = dao.findById(id);
+				Object objectLoaded = dao.findOne(id);
 				PropertyDescriptor pdToLoad = BeanUtils.getPropertyDescriptor(tableClass, property);
 				pdToLoad.getWriteMethod().invoke(obj, objectLoaded);
 
-			} catch (NoSuchFieldException e) {
-				throw new InvalidDataAccessApiUsageException("Field [" + property + "] does not exist on Table Class [" + getTableClass().getName() + "]");
-			} catch (BeansException e) {
-				throw new InvalidDataAccessApiUsageException("Field [" + property + "] does not exist on Table Class [" + getTableClass().getName() + "]");
-			} catch (InvocationTargetException e) {
-				throw new InvalidDataAccessApiUsageException("Field [" + property + "] does not exist on Table Class [" + getTableClass().getName() + "]");
-			} catch (IllegalAccessException e) {
-				throw new InvalidDataAccessApiUsageException("Field [" + property + "] does not exist on Table Class [" + getTableClass().getName() + "]");
+			} catch (Exception e) {
+				throw new InvalidDataAccessApiUsageException("Field [" + property + "] does not exist on Table Class [" + getDomainClass().getName() + "]");
 			}
 		}
 	}
 
+	protected String getEscapedTableName() {
+		return beanMappingDescriptor.getEscapedTableName();
+	}
 }
