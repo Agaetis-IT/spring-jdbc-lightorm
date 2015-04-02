@@ -1,29 +1,31 @@
 package com.agaetis.spring.jdbc.lightorm.rowmapper;
 
-import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.ConfigurablePropertyAccessor;
+import org.springframework.beans.DirectFieldAccessor;
 import org.springframework.beans.NotWritablePropertyException;
-import org.springframework.beans.PropertyAccessorFactory;
 import org.springframework.beans.TypeMismatchException;
+import org.springframework.core.convert.TypeDescriptor;
 import org.springframework.dao.DataRetrievalFailureException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.mapping.PropertyPath;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.JdbcUtils;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
+import com.agaetis.spring.jdbc.lightorm.annotation.ClassId;
 import com.agaetis.spring.jdbc.lightorm.annotation.Column;
 import com.agaetis.spring.jdbc.lightorm.annotation.Id;
 
@@ -34,7 +36,7 @@ import com.agaetis.spring.jdbc.lightorm.annotation.Id;
 public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 
 	/** Logger available to subclasses */
-	protected final Log logger = LogFactory.getLog(getClass());
+	protected final Logger logger = LoggerFactory.getLogger(getClass());
 
 	/** The class we are mapping to */
 	private Class<T> mappedClass;
@@ -45,20 +47,8 @@ public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 	/** Whether we're defaulting primitives when mapping a null value */
 	private boolean primitivesDefaultedForNullValue = false;
 
-	/** Map of the fields we provide mapping for */
-	private Map<String, PropertyDescriptor> mappedFields;
-
-	/** Set of bean properties we provide mapping for */
-	private Set<String> mappedProperties;
-
-	/**
-	 * Create a new BeanPropertyRowMapper for bean-style configuration.
-	 * 
-	 * @see #setMappedClass
-	 * @see #setCheckFullyPopulated
-	 */
-	public AnnotatedBeanPropertyRowMapper() {
-	}
+	/** Map fields we provide mapping for and columns */
+	private Map<String, PropertyPath> fields;
 
 	/**
 	 * Create a new BeanPropertyRowMapper, accepting unpopulated properties in
@@ -66,17 +56,17 @@ public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 	 * <p>
 	 * Consider using the {@link #newInstance} factory method instead, which
 	 * allows for specifying the mapped type once only.
-	 * 
+	 *
 	 * @param mappedClass
 	 *            the class that each row should be mapped to
 	 */
 	public AnnotatedBeanPropertyRowMapper(Class<T> mappedClass) {
-		initialize(mappedClass);
+		this(mappedClass, false);
 	}
 
 	/**
 	 * Create a new BeanPropertyRowMapper.
-	 * 
+	 *
 	 * @param mappedClass
 	 *            the class that each row should be mapped to
 	 * @param checkFullyPopulated
@@ -84,6 +74,8 @@ public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 	 *            have been mapped from corresponding database fields
 	 */
 	public AnnotatedBeanPropertyRowMapper(Class<T> mappedClass, boolean checkFullyPopulated) {
+		Assert.notNull(mappedClass, "Mapped class must not be null.");
+
 		initialize(mappedClass);
 		this.checkFullyPopulated = checkFullyPopulated;
 	}
@@ -103,32 +95,64 @@ public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 
 	/**
 	 * Initialize the mapping metadata for the given class.
-	 * 
+	 *
 	 * @param mappedClass
 	 *            the mapped class.
 	 */
 	protected void initialize(Class<T> mappedClass) {
 		this.mappedClass = mappedClass;
-		this.mappedFields = new HashMap<String, PropertyDescriptor>();
-		this.mappedProperties = new HashSet<String>();
+
+		this.fields = new TreeMap<String, PropertyPath>(String.CASE_INSENSITIVE_ORDER);
 
 		for (Field field : mappedClass.getDeclaredFields()) {
-			PropertyDescriptor pd = BeanUtils.getPropertyDescriptor(mappedClass, field.getName());
+			Id id = field.getAnnotation(Id.class);
+			Column column = field.getAnnotation(Column.class);
 
-			if (pd == null)
+			if ((id == null) && (column == null)) {
 				continue;
-
-			if (pd.getWriteMethod() != null && (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class))) {
-				String fieldName = pd.getName().toLowerCase();
-				if (field.isAnnotationPresent(Column.class)) {
-					if (!StringUtils.isEmpty(field.getAnnotation(Column.class).value()))
-						fieldName = field.getAnnotation(Column.class).value().toLowerCase();
-				}
-				this.mappedFields.put(fieldName, pd);
-				this.mappedProperties.add(fieldName);
 			}
 
+			if (id != null) {
+				Class<?> type = field.getType();
+				if (type.isAnnotationPresent(ClassId.class)) {
+					String prefix = field.getName() + ".";
+
+					Field[] fields = type.getDeclaredFields();
+					for (Field f : fields) {
+						if (f.isAnnotationPresent(Id.class)) {
+							PropertyPath path = PropertyPath.from(prefix + f.getName(), mappedClass);
+
+							registerColumn(path, f);
+						}
+					}
+				} else {
+					PropertyPath path = PropertyPath.from(field.getName(), mappedClass);
+					registerColumn(path, field);
+				}
+			} else if (column != null) {
+				PropertyPath path = PropertyPath.from(field.getName(), mappedClass);
+				registerColumn(path, field);
+
+			}
 		}
+	}
+
+	/**
+	 * Register column with its property path.
+	 *
+	 * @param path
+	 *            path to the field from root class.
+	 */
+	private void registerColumn(PropertyPath path, Field field) {
+
+		String columnName = field.getName().toLowerCase();
+		if (field.isAnnotationPresent(Column.class)) {
+			if (!StringUtils.isEmpty(field.getAnnotation(Column.class).value())) {
+				columnName = field.getAnnotation(Column.class).value().toLowerCase();
+			}
+		}
+
+		this.fields.put(columnName, path);
 	}
 
 	/**
@@ -180,14 +204,17 @@ public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 	 * Extract the values for all columns in the current row.
 	 * <p>
 	 * Utilizes public setters and result set metadata.
-	 * 
+	 *
 	 * @see java.sql.ResultSetMetaData
 	 */
+	@Override
 	public T mapRow(ResultSet rs, int rowNumber) throws SQLException {
-		Assert.state(this.mappedClass != null, "Mapped class was not specified");
-		T mappedObject = BeanUtils.instantiate(this.mappedClass);
-		BeanWrapper bw = PropertyAccessorFactory.forBeanPropertyAccess(mappedObject);
-		initBeanWrapper(bw);
+		Assert.notNull(this.mappedClass, "Mapped class was not specified");
+
+		T result = BeanUtils.instantiate(this.mappedClass);
+
+		DirectFieldAccessor accessor = new DirectFieldAccessor(result);
+		initPropertyAccessor(accessor);
 
 		ResultSetMetaData rsmd = rs.getMetaData();
 		int columnCount = rsmd.getColumnCount();
@@ -195,51 +222,59 @@ public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 
 		for (int index = 1; index <= columnCount; index++) {
 			String column = JdbcUtils.lookupColumnName(rsmd, index);
-			PropertyDescriptor pd = this.mappedFields.get(column.replaceAll(" ", "").toLowerCase());
-			if (pd != null) {
-				try {
-					Object value = getColumnValue(rs, index, pd);
-					if (logger.isDebugEnabled() && rowNumber == 0) {
-						logger.debug("Mapping column '" + column + "' to property '" + pd.getName() + "' of type " + pd.getPropertyType());
-					}
-					try {
-						bw.setPropertyValue(pd.getName(), value);
-					} catch (TypeMismatchException e) {
-						if (value == null && primitivesDefaultedForNullValue) {
-							logger.debug("Intercepted TypeMismatchException for row " + rowNumber + " and column '" + column + "' with value " + value + " when setting property '" + pd.getName()
-									+ "' of type " + pd.getPropertyType() + " on object: " + mappedObject);
-						} else {
-							throw e;
-						}
-					}
-					if (populatedProperties != null) {
-						populatedProperties.add(pd.getName());
-					}
-				} catch (SQLException ex) {
-					throw new DataRetrievalFailureException("Unable to map column " + column + " to property " + pd.getName(), ex);
-				} catch (NotWritablePropertyException ex) {
-					throw new DataRetrievalFailureException("Unable to map column " + column + " to property " + pd.getName(), ex);
+			PropertyPath path = this.fields.get(column);
+
+			if (path == null) {
+				continue;
+			}
+
+			TypeDescriptor type = accessor.getPropertyTypeDescriptor(path.toDotPath());
+			if (type == null) {
+				logger.error("Property descriptor doesn't exist for {}.", path);
+				throw new InvalidDataAccessApiUsageException("Property descriptor doesn't exist for: " + path);
+			}
+			try {
+				Object value = getColumnValue(rs, index, type);
+				if (logger.isDebugEnabled() && (rowNumber == 0)) {
+					logger.debug("Mapping column '{}' to property '{}' of type '{}'.", column, path, type.getType());
 				}
+				try {
+					accessor.setPropertyValue(path.toDotPath(), value);
+				} catch (TypeMismatchException e) {
+					if ((value == null) && primitivesDefaultedForNullValue) {
+						logger.debug("Intercepted TypeMismatchException for row {} and column '{}' with value '{}' when setting property '{}' of type '{}' on object: {}.", rowNumber, column, value,
+								path, type.getType(), result);
+					} else {
+						throw e;
+					}
+				}
+				if (populatedProperties != null) {
+					populatedProperties.add(path.toDotPath());
+				}
+			} catch (SQLException ex) {
+				throw new DataRetrievalFailureException("Unable to map column " + column + " to property " + path, ex);
+			} catch (NotWritablePropertyException ex) {
+				throw new DataRetrievalFailureException("Unable to map column " + column + " to property " + path, ex);
 			}
 		}
 
-		if (populatedProperties != null && !populatedProperties.equals(this.mappedProperties)) {
-			throw new InvalidDataAccessApiUsageException("Given ResultSet does not contain all fields " + "necessary to populate object of class [" + this.mappedClass + "]: " + this.mappedProperties);
+		if ((populatedProperties != null) && !populatedProperties.equals(this.fields.keySet())) {
+			throw new InvalidDataAccessApiUsageException("Given ResultSet does not contain all fields necessary to populate object of class [" + this.mappedClass + "]: " + this.fields.keySet());
 		}
 
-		return mappedObject;
+		return result;
 	}
 
 	/**
-	 * Initialize the given BeanWrapper to be used for row mapping. To be called
-	 * for each row.
+	 * Initialize the given {@link ConfigurablePropertyAccessor} to be used for
+	 * row mapping. To be called for each row.
 	 * <p>
-	 * The default implementation is empty. Can be overridden in subclasses.
-	 * 
-	 * @param bw
-	 *            the BeanWrapper to initialize
+	 *
+	 * @param cpa
+	 *            the ConfigurablePropertyAccessor to initialize
 	 */
-	protected void initBeanWrapper(BeanWrapper bw) {
+	protected void initPropertyAccessor(ConfigurablePropertyAccessor cpa) {
+		cpa.setAutoGrowNestedPaths(true);
 	}
 
 	/**
@@ -249,7 +284,7 @@ public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 	 * {@link org.springframework.jdbc.support.JdbcUtils#getResultSetValue(java.sql.ResultSet, int, Class)}
 	 * . Subclasses may override this to check specific value types upfront, or
 	 * to post-process values return from {@code getResultSetValue}.
-	 * 
+	 *
 	 * @param rs
 	 *            is the ResultSet holding the data
 	 * @param index
@@ -263,21 +298,19 @@ public class AnnotatedBeanPropertyRowMapper<T> implements RowMapper<T> {
 	 * @see org.springframework.jdbc.support.JdbcUtils#getResultSetValue(java.sql.ResultSet,
 	 *      int, Class)
 	 */
-	protected Object getColumnValue(ResultSet rs, int index, PropertyDescriptor pd) throws SQLException {
-		return JdbcUtils.getResultSetValue(rs, index, pd.getPropertyType());
+	protected Object getColumnValue(ResultSet rs, int index, TypeDescriptor type) throws SQLException {
+		return JdbcUtils.getResultSetValue(rs, index, type.getType());
 	}
 
 	/**
 	 * Static factory method to create a new AnnotatedBeanPropertyRowMapper
 	 * (with the mapped class specified only once).
-	 * 
+	 *
 	 * @param mappedClass
 	 *            the class that each row should be mapped to
 	 */
 	public static <T> AnnotatedBeanPropertyRowMapper<T> newInstance(Class<T> mappedClass) {
-		AnnotatedBeanPropertyRowMapper<T> newInstance = new AnnotatedBeanPropertyRowMapper<T>();
-		newInstance.setMappedClass(mappedClass);
-		return newInstance;
+		return new AnnotatedBeanPropertyRowMapper<T>(mappedClass);
 	}
 
 }
