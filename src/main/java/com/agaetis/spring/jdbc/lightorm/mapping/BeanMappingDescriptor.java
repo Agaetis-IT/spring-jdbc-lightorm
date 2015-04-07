@@ -3,10 +3,13 @@ package com.agaetis.spring.jdbc.lightorm.mapping;
 import java.beans.PropertyDescriptor;
 import java.io.Serializable;
 import java.lang.reflect.Field;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.mapping.PropertyPath;
 import org.springframework.data.mapping.model.IllegalMappingException;
 
 import com.agaetis.spring.jdbc.lightorm.annotation.Column;
@@ -18,101 +21,121 @@ import com.agaetis.spring.jdbc.lightorm.annotation.Table;
  * href="http://www.agaetis.fr">Agaetis</a> on 12/03/2015.
  */
 public class BeanMappingDescriptor<T, ID extends Serializable> {
-	private Class<T> tableClass;
+    private Class<T>                                   domainClass;
 
-	private String tableName = null;
+    private String                                     tableName                 = null;
 
-	private String escapedTableName = null;
+    private String                                     escapedTableName          = null;
 
-	private List<ColumnMappingDescriptor> columnsMappingDescriptors = new LinkedList<ColumnMappingDescriptor>();
+    private List<ColumnMappingDescriptor>              columnsMappingDescriptors = new LinkedList<ColumnMappingDescriptor>();
 
-	private IdMappingDescriptor<ID> idMappingDescriptor;
+    private IdMappingDescriptor<ID>                    idMappingDescriptor;
 
-	private String escapedCharacter;
+    private Map<PropertyPath, ColumnMappingDescriptor> paths                     = new HashMap<PropertyPath, ColumnMappingDescriptor>();
 
-	public BeanMappingDescriptor(Class<T> tableClass, String escapedCharacter) {
-		this.escapedCharacter = escapedCharacter;
-		initialize(tableClass);
-	}
+    private String                                     escapedCharacter;
 
-	private void initialize(Class<T> tableClass) {
-		this.tableClass = tableClass;
-		retrieveTableName();
-		retrieveFields();
-	}
+    public BeanMappingDescriptor(Class<T> domainClass, String escapedCharacter) {
+        this.escapedCharacter = escapedCharacter;
+        this.domainClass = domainClass;
 
-	private void retrieveTableName() {
-		String schema = null;
-		if (!tableClass.isAnnotationPresent(Table.class)) {
-			tableName = tableClass.getSimpleName().toLowerCase();
-		} else {
-			Table annotation = tableClass.getAnnotation(Table.class);
-			if (annotation.value().isEmpty()) {
-				tableName = tableClass.getSimpleName().toLowerCase();
-			} else {
-				tableName = annotation.value();
-				if (!annotation.schema().isEmpty()) {
-					schema = annotation.schema();
-				}
-			}
-		}
-		if (schema == null) {
-			escapedTableName = escapedCharacter + tableName + escapedCharacter;
-		} else {
-			escapedTableName = escapedCharacter + schema + escapedCharacter + "." + escapedCharacter + tableName + escapedCharacter;
-		}
-	}
+        initialize();
+    }
 
-	private void retrieveFields() {
-		for (Field field : tableClass.getDeclaredFields()) {
-			if (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class)) {
-				PropertyDescriptor pd = BeanUtils.getPropertyDescriptor(tableClass, field.getName());
+    private void initialize() {
+        retrieveTableName();
+        retrieveFields();
+    }
 
-				if (pd.getReadMethod() == null) {
-					throw new IllegalMappingException("No  getter for field " + field.getName() + " on class " + tableClass.getCanonicalName());
-				}
-				if (pd.getWriteMethod() == null) {
-					throw new IllegalMappingException("No  setter for field " + field.getName() + " on class " + tableClass.getCanonicalName());
-				}
+    private void retrieveTableName() {
+        String schema = null;
+        if (!domainClass.isAnnotationPresent(Table.class)) {
+            tableName = domainClass.getSimpleName().toLowerCase();
+        } else {
+            Table annotation = domainClass.getAnnotation(Table.class);
+            if (annotation.value().isEmpty()) {
+                tableName = domainClass.getSimpleName().toLowerCase();
+            } else {
+                tableName = annotation.value();
+                if (!annotation.schema().isEmpty()) {
+                    schema = annotation.schema();
+                }
+            }
+        }
+        if (schema == null) {
+            escapedTableName = escapedCharacter + tableName + escapedCharacter;
+        } else {
+            escapedTableName = escapedCharacter + schema + escapedCharacter + "." + escapedCharacter + tableName + escapedCharacter;
+        }
+    }
 
-				if (field.isAnnotationPresent(Id.class)) {
-					if (idMappingDescriptor != null) {
-						throw new IllegalMappingException("Id field already found on class " + tableClass.getCanonicalName());
-					}
-					idMappingDescriptor = new IdMappingDescriptor<ID>(tableClass, field, escapedCharacter);
+    private void retrieveFields() {
+        for (Field field : domainClass.getDeclaredFields()) {
+            if (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class)) {
+                PropertyDescriptor pd = BeanUtils.getPropertyDescriptor(domainClass, field.getName());
 
-				} else {
-					columnsMappingDescriptors.add(new ColumnMappingDescriptor(tableClass, field, escapedCharacter));
-				}
-			}
-		}
+                if (pd.getReadMethod() == null) {
+                    throw new IllegalMappingException("No  getter for field " + field.getName() + " on class " + domainClass.getCanonicalName());
+                }
+                if (pd.getWriteMethod() == null) {
+                    throw new IllegalMappingException("No  setter for field " + field.getName() + " on class " + domainClass.getCanonicalName());
+                }
 
-		validateMappings();
-	}
+                if (field.isAnnotationPresent(Id.class)) {
+                    if (idMappingDescriptor != null) {
+                        throw new IllegalMappingException("Id field already found on class " + domainClass.getCanonicalName());
+                    }
+                    idMappingDescriptor = new IdMappingDescriptor<ID>(domainClass, field, escapedCharacter);
+                    if (!idMappingDescriptor.isComposite()) {
+                        ColumnMappingDescriptor id = idMappingDescriptor.getColumns().get(0);
+                        paths.put(PropertyPath.from(id.getField().getName(), domainClass), id);
+                    } else {
+                        for (ColumnMappingDescriptor column : idMappingDescriptor.getColumns()) {
+                            paths.put(PropertyPath.from(idMappingDescriptor.field.getName() + "." + column.getField().getName(), domainClass), column);
+                        }
+                    }
+                } else {
+                    ColumnMappingDescriptor column = new ColumnMappingDescriptor(domainClass, field, escapedCharacter);
+                    columnsMappingDescriptors.add(column);
+                    paths.put(PropertyPath.from(column.getField().getName(), domainClass), column);
+                }
+            }
+        }
 
-	private boolean validateMappings() {
-		// Il faut au moins un Id
-		if (idMappingDescriptor == null) {
-			throw new IllegalMappingException("No Id Field found on class " + tableClass.getCanonicalName());
-		}
+        validateMappings();
+    }
 
-		return true;
-	}
+    private boolean validateMappings() {
+        // Il faut au moins un Id
+        if (idMappingDescriptor == null) {
+            throw new IllegalMappingException("No Id Field found on class " + domainClass.getCanonicalName());
+        }
 
-	public String getTableName() {
-		return tableName;
-	}
+        return true;
+    }
 
-	public List<ColumnMappingDescriptor> getColumnsMappingDescriptors() {
-		return columnsMappingDescriptors;
-	}
+    public String getTableName() {
+        return tableName;
+    }
 
-	public IdMappingDescriptor<ID> getIdMappingDescriptor() {
-		return idMappingDescriptor;
-	}
+    public List<ColumnMappingDescriptor> getColumnsMappingDescriptors() {
+        return columnsMappingDescriptors;
+    }
 
-	public String getEscapedTableName() {
-		return escapedTableName;
-	}
+    public IdMappingDescriptor<ID> getIdMappingDescriptor() {
+        return idMappingDescriptor;
+    }
+
+    public String getEscapedTableName() {
+        return escapedTableName;
+    }
+
+    public Map<PropertyPath, ColumnMappingDescriptor> getPaths() {
+        return paths;
+    }
+
+    public Class<T> getDomainClass() {
+        return domainClass;
+    }
 
 }

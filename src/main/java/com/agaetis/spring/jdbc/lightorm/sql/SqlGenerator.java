@@ -1,28 +1,31 @@
 package com.agaetis.spring.jdbc.lightorm.sql;
 
+import java.io.Serializable;
 import java.util.Collection;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
+import com.agaetis.spring.jdbc.lightorm.mapping.BeanMappingDescriptor;
+
 public interface SqlGenerator {
 
-	public abstract String select(String table);
+    public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor);
 
-	public abstract String select(String table, Collection<String> conditions);
+    public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions);
 
-	public abstract String select(String table, Pageable pageable);
+    public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Pageable pageable);
 
-	public abstract String select(String table, Sort sort);
+    public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Sort sort);
 
-	public abstract String delete(String table);
+    public <T, ID extends Serializable> String delete(BeanMappingDescriptor<T, ID> descriptor);
 
-	public abstract String delete(String table, Collection<String> conditions);
+    public <T, ID extends Serializable> String delete(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions);
 
-	public abstract String count(String table);
+    public <T, ID extends Serializable> String count(BeanMappingDescriptor<T, ID> descriptor);
 
-	public abstract String insert(String table, Collection<String> columns, Collection<String> values);
+    public <T, ID extends Serializable> String insert(BeanMappingDescriptor<T, ID> descriptor, Collection<String> columns, Collection<String> values);
 
-	public abstract String update(String table, Collection<String> columns, Collection<String> conditions);
+    public <T, ID extends Serializable> String update(BeanMappingDescriptor<T, ID> descriptor, Collection<String> columns, Collection<String> conditions);
 
 }

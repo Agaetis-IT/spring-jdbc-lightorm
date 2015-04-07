@@ -15,19 +15,19 @@ import org.springframework.data.repository.PagingAndSortingRepository;
  */
 public abstract class LightOrmPagedRepository<T, ID extends Serializable> extends LightOrmCrudRepository<T, ID> implements PagingAndSortingRepository<T, ID> {
 
-	@Override
-	public Page<T> findAll(Pageable pageable) {
-		String sql = generator.select(getBeanMappingDescriptor().getEscapedTableName(), pageable);
+    @Override
+    public Page<T> findAll(Pageable pageable) {
+        String sql = generator.select(getBeanMappingDescriptor(), pageable);
 
-		List<T> results = getJdbcTemplate().query(sql, getRowMapper());
+        List<T> results = getJdbcTemplate().query(sql, getRowMapper());
 
-		return new PageImpl<T>(results, pageable, count());
-	}
+        return new PageImpl<T>(results, pageable, count());
+    }
 
-	@Override
-	public Iterable<T> findAll(Sort sort) {
-		String sql = generator.select(getBeanMappingDescriptor().getEscapedTableName(), sort);
+    @Override
+    public Iterable<T> findAll(Sort sort) {
+        String sql = generator.select(getBeanMappingDescriptor(), sort);
 
-		return getJdbcTemplate().query(sql, getRowMapper());
-	}
+        return getJdbcTemplate().query(sql, getRowMapper());
+    }
 }
