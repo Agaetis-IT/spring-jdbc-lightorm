@@ -168,14 +168,12 @@ public abstract class LightOrmCrudRepository<T, ID extends Serializable> impleme
         return result;
     }
 
-    private void createWithKeyHolder(T obj, String sql, Map<String, Object> allParams) {
+    private void createWithKeyHolder(T obj, String sql, MapSqlParameterSource parameterSource) {
         IdMappingDescriptor<ID> idDescriptor = beanMappingDescriptor.getIdMappingDescriptor();
 
         ColumnMappingDescriptor columnDescriptor = idDescriptor.getColumns().get(0);
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
-
-        MapSqlParameterSource parameterSource = buildParameterSource(allParams);
 
         namedParameterJdbcTemplate.update(sql, parameterSource, keyHolder, new String[] { columnDescriptor.getColumnName() });
 
@@ -258,10 +256,12 @@ public abstract class LightOrmCrudRepository<T, ID extends Serializable> impleme
 
         String sql = generator.insert(beanMappingDescriptor, updatedFields, updatedValueFields);
 
+        MapSqlParameterSource parameterSource = buildParameterSource(allParams);
+
         if (autoIncremented) {
-            createWithKeyHolder(obj, sql, allParams);
+            createWithKeyHolder(obj, sql, parameterSource);
         } else {
-            namedParameterJdbcTemplate.update(sql, allParams);
+            namedParameterJdbcTemplate.update(sql, parameterSource);
         }
         return obj;
     }
