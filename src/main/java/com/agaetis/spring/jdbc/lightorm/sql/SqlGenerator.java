@@ -14,15 +14,21 @@ public interface SqlGenerator {
 
     public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions);
 
+    public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions, Pageable pageable);
+
     public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Pageable pageable);
 
     public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Sort sort);
+
+    public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions, Sort sort);
 
     public <T, ID extends Serializable> String delete(BeanMappingDescriptor<T, ID> descriptor);
 
     public <T, ID extends Serializable> String delete(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions);
 
     public <T, ID extends Serializable> String count(BeanMappingDescriptor<T, ID> descriptor);
+
+    public <T, ID extends Serializable> String count(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions);
 
     public <T, ID extends Serializable> String insert(BeanMappingDescriptor<T, ID> descriptor, Collection<String> columns, Collection<String> values);
 

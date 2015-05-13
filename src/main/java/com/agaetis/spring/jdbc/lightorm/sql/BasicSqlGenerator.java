@@ -16,7 +16,7 @@ public class BasicSqlGenerator implements SqlGenerator {
 
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#select(java.lang.String
      * )
@@ -28,7 +28,7 @@ public class BasicSqlGenerator implements SqlGenerator {
 
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#select(java.lang.String
      * , java.util.Collection)
@@ -40,7 +40,7 @@ public class BasicSqlGenerator implements SqlGenerator {
 
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#select(java.lang.String
      * , org.springframework.data.domain.Pageable)
@@ -49,14 +49,27 @@ public class BasicSqlGenerator implements SqlGenerator {
     public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Pageable pageable) {
         StringBuilder sql = new StringBuilder(select(descriptor, pageable.getSort()));
 
+        pageable(pageable, sql);
+
+        return sql.toString();
+    }
+
+    protected void pageable(Pageable pageable, StringBuilder sql) {
         sql.append(" LIMIT ").append(pageable.getPageSize()).append(" OFFSET ").append(pageable.getOffset());
+    }
+
+    @Override
+    public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions, Pageable pageable) {
+        StringBuilder sql = new StringBuilder(select(descriptor, conditions, pageable.getSort()));
+
+        pageable(pageable, sql);
 
         return sql.toString();
     }
 
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#select(java.lang.String
      * , org.springframework.data.domain.Sort)
@@ -65,6 +78,12 @@ public class BasicSqlGenerator implements SqlGenerator {
     public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Sort sort) {
         StringBuilder sql = new StringBuilder(select(descriptor));
 
+        sort(descriptor, sort, sql);
+
+        return sql.toString();
+    }
+
+    protected <T, ID extends Serializable> void sort(BeanMappingDescriptor<T, ID> descriptor, Sort sort, StringBuilder sql) {
         if (sort != null) {
             sql.append(" ORDER BY");
             for (Order order : sort) {
@@ -86,6 +105,13 @@ public class BasicSqlGenerator implements SqlGenerator {
             }
             sql.deleteCharAt(sql.length() - 1);
         }
+    }
+
+    @Override
+    public <T, ID extends Serializable> String select(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions, Sort sort) {
+        StringBuilder sql = new StringBuilder(select(descriptor, conditions));
+
+        sort(descriptor, sort, sql);
 
         return sql.toString();
     }
@@ -97,7 +123,7 @@ public class BasicSqlGenerator implements SqlGenerator {
 
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#delete(java.lang.String
      * )
@@ -109,7 +135,7 @@ public class BasicSqlGenerator implements SqlGenerator {
 
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#delete(java.lang.String
      * , java.util.Collection)
@@ -121,7 +147,7 @@ public class BasicSqlGenerator implements SqlGenerator {
 
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#count(java.lang.String)
      */
@@ -130,9 +156,14 @@ public class BasicSqlGenerator implements SqlGenerator {
         return String.format("SELECT COUNT(*) FROM %s", descriptor.getEscapedTableName());
     }
 
+    @Override
+    public <T, ID extends Serializable> String count(BeanMappingDescriptor<T, ID> descriptor, Collection<String> conditions) {
+        return String.format("SELECT COUNT(*) FROM %s WHERE %s", descriptor.getEscapedTableName(), StringUtils.join(conditions, " AND "));
+    }
+
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#insert(java.lang.String
      * , java.util.Collection, java.util.Collection)
@@ -144,7 +175,7 @@ public class BasicSqlGenerator implements SqlGenerator {
 
     /*
      * (non-Javadoc)
-     *
+     * 
      * @see
      * com.agaetis.spring.jdbc.lightorm.sql.SqlGenerator#update(java.lang.String
      * , java.util.Collection, java.util.Collection)
@@ -153,4 +184,5 @@ public class BasicSqlGenerator implements SqlGenerator {
     public <T, ID extends Serializable> String update(BeanMappingDescriptor<T, ID> descriptor, Collection<String> columns, Collection<String> conditions) {
         return String.format("UPDATE %s SET %s WHERE %s", descriptor.getEscapedTableName(), StringUtils.join(columns, ","), StringUtils.join(conditions, " AND "));
     }
+
 }
