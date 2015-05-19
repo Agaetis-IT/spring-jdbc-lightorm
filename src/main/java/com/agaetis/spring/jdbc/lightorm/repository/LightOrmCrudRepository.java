@@ -336,9 +336,10 @@ public abstract class LightOrmCrudRepository<T, ID extends Serializable> impleme
         String sql = generator.select(beanMappingDescriptor, sqlConditions);
 
         Map<String, Object> params = extractIdParams(id);
+        MapSqlParameterSource parameters = buildParameterSource(params);
 
         try {
-            return namedParameterJdbcTemplate.queryForObject(sql, params, getRowMapper());
+            return namedParameterJdbcTemplate.queryForObject(sql, parameters, getRowMapper());
         } catch (EmptyResultDataAccessException ex) {
             return null;
         }
@@ -379,7 +380,9 @@ public abstract class LightOrmCrudRepository<T, ID extends Serializable> impleme
         }
         String sql = generator.delete(beanMappingDescriptor, sqlConditions);
 
-        namedParameterJdbcTemplate.update(sql, params);
+        MapSqlParameterSource parameters = buildParameterSource(params);
+
+        namedParameterJdbcTemplate.update(sql, parameters);
     }
 
     @Override
@@ -402,7 +405,9 @@ public abstract class LightOrmCrudRepository<T, ID extends Serializable> impleme
 
         String sql = generator.delete(beanMappingDescriptor, sqlConditions);
 
-        namedParameterJdbcTemplate.update(sql, params);
+        MapSqlParameterSource parameters = buildParameterSource(params);
+
+        namedParameterJdbcTemplate.update(sql, parameters);
     }
 
     @Override
